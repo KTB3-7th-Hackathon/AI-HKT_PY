@@ -45,7 +45,7 @@ class HKTVectorStore:
             print(f"CSV 로드 중 오류 발생: {e}")
             return None
 
-    def chunk_text(self, text: str, chunk_size: int = 50, overlap: int = 5) -> List[str]:
+    def chunk_text(self, text: str, chunk_size: int = 200, overlap: int = 10) -> List[str]:
         """
         문장 단위로 똑똑하게 자르는 청킹 함수.
         단순히 글자 수로 자르지 않고, 마침표(.)나 줄바꿈(\n) 등을 고려합니다.
@@ -233,6 +233,11 @@ def main():
     for res in results:
         print(f"[유사도: {res['score']:.4f}] {res['title']}")
         print(f" - 내용: {res['content'][:50]}...")
+
+
+
+        # 요약은 10줄이내로
+        # 판단근거문장 2~3줄
 
 if __name__ == "__main__":
     main()

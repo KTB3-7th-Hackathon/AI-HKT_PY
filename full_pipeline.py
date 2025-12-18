@@ -43,7 +43,10 @@ def get_video_transcript(video_id):
         return None
 
 def refine_script(text):
-    """Refines the raw transcript using Gemini 2.5 Flash."""
+    """
+    Refines the raw transcript using Gemini 2.5 Flash.
+    Returns: {"refined": 정제된 텍스트, "summary": 3줄 요약}
+    """
     print("\n--- Refining Script with Gemini ---")
     
     prompt = f'''
@@ -51,29 +54,43 @@ def refine_script(text):
     너는 뉴스 자막 편집 전문가다.
 
     INSTRUCTIONS:
-    - 원문 의미를 절대 바꾸지 마라
-    - 요약하지 말고 전체 내용을 유지하라
-    - 자동 생성 자막의 오탈자, 중복, 잘린 문장을 복원하라
-    - 줄바꿈은 문단 단위로 정리하라
-    - 화자 기호(>>, - 등)는 제거하라
-    - 추측이나 해석을 추가하지 마라
+    1. [정제] 원문 의미를 절대 바꾸지 마라. 요약하지 말고 전체 내용을 유지하라.
+       - 자동 생성 자막의 오탈자, 중복, 잘린 문장을 복원하라
+       - 줄바꿈은 문단 단위로 정리하라
+       - 화자 기호(>>, - 등)는 제거하라
+       - 추측이나 해석을 추가하지 마라
+
+    2. [요약] 정제된 내용을 3줄 이내로 핵심만 요약하라.
 
     INPUT:
     {text}
 
-    OUTPUT:
-    정제된 한국어 뉴스 문장
+    OUTPUT FORMAT (정확히 이 형식으로):
+    [정제]
+    (정제된 전체 텍스트)
+
+    [요약]
+    (3줄 이내 핵심 요약)
     '''
 
     try:
-        # Generate content
-        # response = client.models.generate_content(
-        #     model="gemini-2.0-flash",
-        #     contents=prompt
-        # )
-
         response = model.generate_content(prompt)
-        return response.text
+        result_text = response.text
+        
+        # 파싱: [정제]와 [요약] 분리
+        refined = ""
+        summary = ""
+        
+        if "[정제]" in result_text and "[요약]" in result_text:
+            parts = result_text.split("[요약]")
+            refined = parts[0].replace("[정제]", "").strip()
+            summary = parts[1].strip() if len(parts) > 1 else ""
+        else:
+            # 파싱 실패 시 전체를 refined로
+            refined = result_text
+            summary = "요약 생성 실패"
+        
+        return {"refined": refined, "summary": summary}
 
 
         #################################### 안해도됨 ########################################
