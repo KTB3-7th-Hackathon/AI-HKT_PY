@@ -26,11 +26,28 @@ model_embedding = GenerativeModel("gemini-embedding-001")
 # Initialize Client
 # client = genai.Client(api_key=API_KEY)
 
-def get_video_transcript(video_id):
+def get_video_transcript(url):
     """Fetches Korean transcript from YouTube."""
-    print(f"--- Fetching Transcript for {video_id} ---")
+    print(f"--- Fetching Transcript for {url} ---")
     try:
         ytt_api = YouTubeTranscriptApi()
+
+
+        #################################################
+        # https://www.youtube.com/watch?v=YxmUIfr6HmU
+        # asdf
+        regex = r'(?:v=|\/|be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})'
+    
+        match = re.search(regex, url_or_string)
+    
+        if match:
+            video_id = match.group(1)
+        else:
+            # 이미 11자리 ID만 들어온 경우를 대비한 체크
+            if len(url_or_string) == 11:
+                video_id = url_or_string
+        #################################################
+
         transcript_list = ytt_api.fetch(video_id, languages=['ko'])
         
         full_text = " ".join([snippet.text for snippet in transcript_list])
@@ -134,36 +151,3 @@ def create_embeddings(chunks):
     except Exception as e:
         print(f"임베딩 에러: {e}")
         return None
-
-def main():
-    # Youtube Video ID / 나중에 설정
-    VIDEO_ID = "TCaDxE3wXsI"
-
-    # 1. Fetch
-    raw_script = get_video_transcript(VIDEO_ID)
-    if not raw_script:
-        return
-
-    # 2. Refine
-    refined_script = refine_script(raw_script)
-    if not refined_script:
-        return
-
-    print("\n[Preview of Refined Script]")
-    print(refined_script[:200] + "...\n")
-
-    # 3. Embed
-    # For embedding, we might want to split by lines or process the whole block.
-    # Here we treat the whole refined text as one chunk, or split by lines/paragraphs.
-    # Let's split by newline for demonstration if the result has paragraphs.
-    chunks = [line for line in refined_script.split('\n') if line.strip()]
-    
-    if chunks:
-        embeddings = create_embeddings(chunks)
-        if embeddings:
-            print(f"First embedding vector dimension: {len(embeddings[0].values)}")
-    else:
-        print("No content to embed.")
-
-if __name__ == "__main__":
-    main()

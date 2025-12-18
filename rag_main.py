@@ -143,14 +143,13 @@ def calculate_bias_score(matches):
 # ============================================================
 # Service Layer: analyze_video (Controller에서 호출)
 # ============================================================
-def analyze_video(video_id: str, tag: str) -> dict:
+def analyze_video(url: str, tag: str) -> dict:
     """
     YouTube 영상을 분석하여 다음을 반환합니다:
     {
         "summary": 뉴스 요약 (3줄),
         "biased_sentences": 편향이라 판단한 상위 2개 문장,
-        "bias_score": 편향도 점수,
-        "bias_label": 편향 레이블 (극좌/좌파/중도/보수/극우)
+        "weight": 편향도 점수,
     }
     """
     # 1. Vector Store 초기화 및 로드
@@ -160,7 +159,7 @@ def analyze_video(video_id: str, tag: str) -> dict:
         return {"error": "Vector Store not found. Build index first."}
     
     # 2. YouTube 트랜스크립트 가져오기
-    raw_script = get_video_transcript(video_id)
+    raw_script = get_video_transcript(url)
     if not raw_script:
         return {"error": "Failed to fetch transcript."}
     
@@ -204,12 +203,12 @@ def analyze_video(video_id: str, tag: str) -> dict:
     
     return {
         "report_text": summary,
-        "words": biased_sentences,
+        "sentences": biased_sentences,
         "weight": bias_result["score"]
     }
 
 
-def service(tag: str):
+def service(url:str, tag: str):
     """
     CLI 테스트용 main 함수.
     analyze_video() 서비스 함수를 호출하고 결과를 출력합니다.
@@ -219,13 +218,13 @@ def service(tag: str):
     print("=== YouTube RAG Pipeline (Service Test) ===\n")
     
     # 테스트할 비디오 ID
-    VIDEO_ID = "TCaDxE3wXsI"  # YTN
+    # VIDEO_ID = "TCaDxE3wXsI"  # YTN
     # VIDEO_ID = "YxmUIfr6HmU"  # 극우 테스트용
     
-    print(f">> 분석 대상: {VIDEO_ID}\n")
+    # print(f">> 분석 대상: {VIDEO_ID}\n")
     
     # 서비스 함수 호출
-    result = analyze_video(VIDEO_ID, tag)
+    result = analyze_video(url, tag)
     
     # 결과 출력
     print("\n" + "="*80)
@@ -235,13 +234,3 @@ def service(tag: str):
     print("="*80)
     
     return result
-
-# ============================================================
-# Label Reference (CSV title -> 레이블)
-# ============================================================
-# 1: 보수논객
-# 2: 좌파논객
-# 3: 보수렉카
-# 4: 중립
-# 5: 좌파렉카
-# ============================================================

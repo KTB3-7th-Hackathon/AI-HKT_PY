@@ -5,6 +5,8 @@ from typing import List
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict, Field
 
+from rag_main import service
+
 
 app = FastAPI(title="geminitest API", version="0.1.0")
 
@@ -36,10 +38,12 @@ def create_report(request: ReportRequest):
     현재는 컨트롤러 인터페이스만 고정하기 위한 기본 구현입니다.
     실제 서비스 로직(유튜브 스크립트 추출 → RAG/가공)은 추후 서비스 레이어가 준비되면 연결합니다.
     """
+    ragResponse = service(request.url, request.tag)
+
     response = ReportResponse(
-        report_text="",
-        words=[],
-        weight=0,
+        report_text=ragResponse.report_text,
+        sentences=ragResponse.sentences,
+        weight=ragResponse.weight,
         tag=request.tag,
     )
 
