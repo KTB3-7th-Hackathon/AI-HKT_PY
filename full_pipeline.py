@@ -1,4 +1,5 @@
 import os
+import re
 from youtube_transcript_api import YouTubeTranscriptApi
 from google import genai
 from google.genai import types
