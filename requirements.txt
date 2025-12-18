@@ -8,3 +8,4 @@ uvicorn[standard]>=0.27
 google-cloud-aiplatform>=1.49.0
 google-auth>=2.0.0
 python-dotenv>=1.0.1
+openai>=1.50.0
