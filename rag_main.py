@@ -159,7 +159,8 @@ def analyze_video(url: str, tag: str) -> dict:
         return {"error": "Vector Store not found. Build index first."}
     
     # 2. YouTube 트랜스크립트 가져오기
-    raw_script = get_video_transcript(url)
+    # raw_script = get_video_transcript(url)
+    raw_script = "내란특검은 김건희 씨의 비상개엄 선포 관여 의혹은 사실이 아니라고 결론 내렸다고 밝혔습니다. >> 박지영 특별 검사보는 오늘 최종 수사 결과를 발표하며 명태균 사건 등에서 김씨의 개입이 나오긴 하지만 개엄 선포에 관여하거나 윤석열 전 대통령이 개엄을 선포한 이유는 아닌 것 같다고 말했습니다."
     if not raw_script:
         return {"error": "Failed to fetch transcript."}
     
