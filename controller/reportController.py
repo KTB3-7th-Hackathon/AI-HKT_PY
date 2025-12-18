@@ -18,7 +18,7 @@ class ReportRequest(BaseModel):
 
 class ReportResponse(BaseModel):
     report_text: str = Field(..., alias="reportText")
-    words: List[str]
+    sentences: List[str]
     weight: int
     tag: str
 
