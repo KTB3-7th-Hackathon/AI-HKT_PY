@@ -1,5 +1,5 @@
-
 import os
+from dotenv import load_dotenv
 import pickle
 import pandas as pd
 import faiss
@@ -7,20 +7,24 @@ import numpy as np
 import time
 from typing import List, Dict, Optional
 
-# Google Vertex AI
-import vertexai
-from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
+# .env 파일 로드
+load_dotenv()
+
+# OpenAI API
+from openai import OpenAI
 
 # --- 설정 (Configuration) ---
 CSV_PATH = "testtest.csv"
 INDEX_FILE = "faiss_index.bin"
 METADATA_FILE = "metadata.pkl"
-DIMENSION = 768  # Text Embedding 004의 차원 수
-PROJECT_ID = "strong-retina-481600-g2"
-LOCATION = "us-central1"
+DIMENSION = 1536  # text-embedding-3-small의 차원 수
+EMBEDDING_MODEL = "text-embedding-3-small"
+LLM_MODEL = "gpt-4o-mini"
 
-# 초기화
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+# OpenAI 클라이언트 초기화 (OPENAI_API_KEY 환경변수 필요)
+client = OpenAI(api_key= os.getenv("OPENAI_API_KEY"))
+
+
 
 class HKTVectorStore:
     def __init__(self, index_file: str = INDEX_FILE, metadata_file: str = METADATA_FILE):
@@ -28,7 +32,7 @@ class HKTVectorStore:
         self.metadata_file = metadata_file
         self.index = None
         self.metadata: List[Dict] = []
-        self.model = TextEmbeddingModel.from_pretrained("text-embedding-004")
+        self.client = client  # OpenAI 클라이언트
 
     def load_data(self, csv_path: str) -> Optional[pd.DataFrame]:
         """CSV 파일을 로드합니다."""
@@ -39,7 +43,7 @@ class HKTVectorStore:
             # skipinitialspace=True: 컬럼명이나 데이터 앞의 공백 무시
             df = pd.read_csv(csv_path, skipinitialspace=True)
             print(f"{csv_path} 로드 완료. 데이터 개수: {len(df)}")
-            print(f"컬럼 목록: {df.columns.tolist()}") # 디버깅용
+            print(f"컬럼 목록: {df.columns.tolist()}")  # 디버깅용
             return df
         except Exception as e:
             print(f"CSV 로드 중 오류 발생: {e}")
@@ -57,10 +61,10 @@ class HKTVectorStore:
         # 실제로는 정규식 등으로 더 정교하게 할 수 있지만, 여기선 단순화
         raw_sentences = text.replace('\n', ' ').split('. ')
         sentences = [s.strip() + '.' for s in raw_sentences if s.strip()]
-        
+
         chunks = []
         current_chunk = ""
-        
+
         for sentence in sentences:
             # 현재 청크에 문장을 더해도 사이즈를 넘지 않으면 추가
             if len(current_chunk) + len(sentence) <= chunk_size:
@@ -69,27 +73,28 @@ class HKTVectorStore:
                 # 사이즈를 넘으면 현재 청크 저장 후 초기화
                 if current_chunk:
                     chunks.append(current_chunk.strip())
-                
+
                 # overlap을 고려하여 이전 청크의 뒷부분을 가져올 수도 있지만
                 # 여기서는 문장이 너무 길 경우 강제로 자르는 로직만 추가하거나
                 # 그냥 새 청크로 시작함 (단순화)
                 if len(sentence) > chunk_size:
                     # 문장 자체가 너무 길면 강제 분할
                     for i in range(0, len(sentence), chunk_size - overlap):
-                        chunks.append(sentence[i:i+chunk_size])
-                    current_chunk = "" # 이미 다 처리했으므로
+                        chunks.append(sentence[i:i + chunk_size])
+                    current_chunk = ""  # 이미 다 처리했으므로
                 else:
                     current_chunk = sentence
 
         # 마지막 남은 청크 처리
         if current_chunk:
             chunks.append(current_chunk.strip())
-            
+
         return chunks
 
-    def get_embeddings(self, text_list: List[str], batch_size: int = 5) -> np.array:
+    def get_embeddings(self, text_list: List[str], batch_size: int = 100) -> np.array:
         """
         텍스트 리스트를 배치 단위로 나누어 임베딩을 생성합니다.
+        OpenAI text-embedding-3-small 모델 사용
         """
         if not text_list:
             print("임베딩을 생성할 텍스트가 없습니다.")
@@ -100,26 +105,25 @@ class HKTVectorStore:
         print(f"총 {total}개의 텍스트 임베딩 생성 시작 (배치 크기: {batch_size})...")
 
         for i in range(0, total, batch_size):
-            batch = text_list[i : i + batch_size]
+            batch = text_list[i: i + batch_size]
             try:
-                # Vertex AI SDK 호출
-                inputs = [TextEmbeddingInput(text, task_type="RETRIEVAL_DOCUMENT") for text in batch]
-                result = self.model.get_embeddings(inputs)
-                
-                embeddings = [embedding.values for embedding in result]
+                # OpenAI Embeddings API 호출
+                response = self.client.embeddings.create(
+                    model=EMBEDDING_MODEL,
+                    input=batch
+                )
+
+                embeddings = [item.embedding for item in response.data]
                 all_embeddings.extend(embeddings)
-                
-                # 진행 상황 출력 (선택)
-                # print(f"  - {min(i + batch_size, total)}/{total} 완료")
-                
-                # API 속도 제한 방지를 위한 짧은 대기 (필요시)
-                time.sleep(0.1) 
-                
+
+                # 진행 상황 출력
+                print(f"  - {min(i + batch_size, total)}/{total} 완료")
+
+                # API 속도 제한 방지를 위한 짧은 대기
+                time.sleep(0.1)
+
             except Exception as e:
-                print(f"  - 배치 {i}~{i+batch_size} 처리 중 에러: {e}")
-                # 에러 발생 시 해당 배치는 0 벡터나 None으로 처리해야 인덱스 밀림을 방지할 수 있음
-                # 여기서는 스킵하지 않고 에러를 출력하고 중단하거나, 
-                # 실전에서는 재시도 로직이 필요함.
+                print(f"  - 배치 {i}~{i + batch_size} 처리 중 에러: {e}")
                 return None
 
         return np.array(all_embeddings, dtype='float32')
@@ -138,15 +142,15 @@ class HKTVectorStore:
             return
 
         d = embeddings.shape[1]
-        
+
         # FAISS 인덱스 생성
-        faiss.normalize_L2(embeddings) # 코사인 유사도를 위해 정규화
+        faiss.normalize_L2(embeddings)  # 코사인 유사도를 위해 정규화
         self.index = faiss.IndexFlatIP(d)
         self.index.add(embeddings)
-        
+
         # 메타데이터 저장
         self.metadata = [{"title": t, "content": c} for t, c in zip(titles, texts)]
-        
+
         print(f"인덱스 구축 완료. 크기: {self.index.ntotal}")
 
     def save(self):
@@ -174,16 +178,18 @@ class HKTVectorStore:
             print("인덱스가 비어있습니다.")
             return []
 
-        # 쿼리 임베딩
+        # 쿼리 임베딩 (OpenAI API)
         try:
-            inputs = [TextEmbeddingInput(query, task_type="RETRIEVAL_QUERY")] # Query는 타입 다르게
-            result = self.model.get_embeddings(inputs)
-            query_vec = np.array([res.values for res in result], dtype='float32')
-            
+            response = self.client.embeddings.create(
+                model=EMBEDDING_MODEL,
+                input=[query]
+            )
+            query_vec = np.array([response.data[0].embedding], dtype='float32')
+
             faiss.normalize_L2(query_vec)
-            
+
             distances, indices = self.index.search(query_vec, k)
-            
+
             results = []
             for i in range(k):
                 idx = indices[0][i]
@@ -199,45 +205,3 @@ class HKTVectorStore:
         except Exception as e:
             print(f"검색 중 오류: {e}")
             return []
-
-def main():
-    # 테스트용 메인 함수
-    store = HKTVectorStore()
-    
-    # 1. 로드 시도
-    if not store.load():
-        print("기존 인덱스가 없어 새로 생성합니다.")
-        df = store.load_data(CSV_PATH)
-        if df is not None:
-            all_texts = []
-            all_titles = []
-            
-            # Chunking 및 데이터 준비
-            for _, row in df.iterrows():
-                content = str(row.get('content', ''))
-                title = row.get('title', 'No Title')
-                chunks = store.chunk_text(content)
-                
-                for c in chunks:
-                    all_texts.append(c)
-                    all_titles.append(title)
-            
-            # 인덱스 빌드 및 저장
-            store.build_index(all_texts, all_titles)
-            store.save()
-    
-    # 2. 검색 테스트
-    query = "Python coding"
-    print(f"\n--- 검색 테스트: '{query}' ---")
-    results = store.search(query)
-    for res in results:
-        print(f"[유사도: {res['score']:.4f}] {res['title']}")
-        print(f" - 내용: {res['content'][:50]}...")
-
-
-
-        # 요약은 10줄이내로
-        # 판단근거문장 2~3줄
-
-if __name__ == "__main__":
-    main()
