@@ -217,7 +217,7 @@ def analyze_video(url: str, tag: str) -> dict:
     }
 
 
-def main(url: str, tag: str):
+def service(url: str, tag: str):
     """
     CLI 테스트용 main 함수.
     analyze_video() 서비스 함수를 호출하고 결과를 출력합니다.
@@ -243,7 +243,3 @@ def main(url: str, tag: str):
     print("=" * 80)
 
     return result
-
-#
-if __name__ == "__main__":
-    main("https://www.youtube.com/watch?v=TCaDxE3wXsI", "YTN")

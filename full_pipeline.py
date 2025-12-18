@@ -26,7 +26,7 @@ def get_video_transcript(url):
     """Fetches Korean transcript from YouTube."""
     print(f"--- Fetching Transcript for {url} ---")
     try:
-        ytt_api = YouTubeTranscriptApi()
+        # ytt_api = YouTubeTranscriptApi()
 
         #################################################
         # https://www.youtube.com/watch?v=YxmUIfr6HmU
@@ -43,7 +43,7 @@ def get_video_transcript(url):
                 video_id = url
         #################################################
 
-        transcript_list = ytt_api.fetch(video_id, languages=['ko'])
+        # transcript_list = ytt_api.fetch(video_id, languages=['ko'])
 
         full_text = " ".join([snippet.text for snippet in transcript_list])
 
