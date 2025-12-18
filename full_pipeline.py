@@ -39,14 +39,14 @@ def get_video_transcript(url):
         # asdf
         regex = r'(?:v=|\/|be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})'
     
-        match = re.search(regex, url_or_string)
+        match = re.search(regex, url)
     
         if match:
             video_id = match.group(1)
         else:
             # 이미 11자리 ID만 들어온 경우를 대비한 체크
-            if len(url_or_string) == 11:
-                video_id = url_or_string
+            if len(url) == 11:
+                video_id = url
         #################################################
 
         transcript_list = ytt_api.fetch(video_id, languages=['ko'])
