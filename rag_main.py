@@ -2,79 +2,246 @@ import os
 from full_pipeline import get_video_transcript, refine_script
 from vector import HKTVectorStore, CSV_PATH
 
-def main():
-    print("=== YouTube RAG Pipeline Start (Class-based) ===\n")
+from vertexai.generative_models import GenerativeModel
+
+# Reranking을 위한 Gemini 모델 (속도가 빠른 Flash 권장)
+rerank_model = GenerativeModel("gemini-2.5-flash")
+
+def rerank_candidates(query_chunk, candidates):
+    """
+    벡터 검색으로 나온 후보군(candidates) 중에서
+    정치적 성향(Stance)과 논조(Tone)가 가장 일치하는 1개를 Gemini가 선택합니다.
+    """
     
-    # 1. Vector Store 초기화
-    store = HKTVectorStore() 
+    # 후보군 텍스트 포맷팅
+    candidates_text = ""
+    for i, cand in enumerate(candidates):
+        candidates_text += f"[{i+1}] {cand['content']}\n"
+
+    prompt = f"""
+    SYSTEM:
+    너는 정치적 성향 분석 전문가다.
+    주어진 [입력 문장]과 [후보 문장들]을 비교하여, **'정치적 성향(Political Stance)'과 '비판 대상'이 가장 일치하는 문장** 하나를 골라라.
     
-    # 2. 로드 또는 새로 구축
-    if store.load():
-        print(f">> 기존 라이브러리 로드 완료. (문서 수: {len(store.metadata)})")
+    INSTRUCTIONS:
+    1. 단순 단어 매칭이 아니라, **문장의 의도와 편향성**이 일치해야 한다.
+    2. 예를 들어, 입력이 "우파 비판"이면 후보도 "우파 비판"이어야 한다. 입력이 "좌파 비판"인데 후보가 "우파 비판"이면 절대 선택하면 안 된다.
+    3. [입력 문장]이 단순 욕설이거나, [후보 문장들] 중에 논리적으로 유사한 게 전혀 없다면 "NONE"을 반환하라.
+    4. 가장 적절한 후보가 있다면 그 번호(예: 1, 2, 3...)만 딱 출력하라. 사족 달지 마라.
+
+    [입력 문장]:
+    {query_chunk}
+
+    [후보 문장들]:
+    {candidates_text}
+
+    OUTPUT (번호 or NONE):
+    """
+    # print(candidates_text)
+    
+    try:
+        response = rerank_model.generate_content(prompt)
+        result = response.text.strip()
+        
+        if "NONE" in result:
+            return None
+        
+        # 숫자만 추출
+        import re
+        match = re.search(r'\d+', result)
+        if match:
+            idx = int(match.group()) - 1 # 0-indexed로 변환
+            if 0 <= idx < len(candidates):
+                return candidates[idx]
+        return None
+    except Exception as e:
+        print(f"Reranking Error: {e}")
+        return None
+
+
+# ============================================================
+# 편향도 계산 함수
+# ============================================================
+def calculate_bias_score(matches):
+    """
+    Top N 매칭 결과를 받아 가중평균 편향도를 계산합니다.
+    
+    레이블 매핑:
+        좌파렉카: -2, 진보논객/좌파논객: -1, 중도/중립: 0, 보수논객: +1, 보수렉카: +2
+    
+    Returns: {"score": float, "label": str, "detail": dict}
+    """
+    label_to_score = {
+        "좌파렉카": -2,
+        "좌파논객": -1,
+        "진보논객": -1,
+        "중도": 0,
+        "중립": 0,
+        "보수논객": 1,
+        "보수렉카": 2
+    }
+    
+    # CSV title (숫자)를 label로 변환하는 매핑
+    title_to_label = {
+        1: "보수논객",
+        2: "좌파논객",
+        3: "보수렉카",
+        4: "중립",
+        5: "좌파렉카"
+    }
+    
+    if not matches:
+        return {"score": 0.0, "label": "분석 불가", "detail": {}}
+    
+    weighted_sum = 0.0
+    total_weight = 0.0
+    label_counts = {}
+    
+    for m in matches:
+        raw_title = m.get("found_title", "중립")
+        similarity = m.get("score", 0.5)
+        
+        # title -> label 변환
+        try:
+            label = title_to_label.get(int(raw_title), str(raw_title))
+        except:
+            label = str(raw_title)
+        
+        # label counts
+        label_counts[label] = label_counts.get(label, 0) + 1
+        
+        # weighted sum
+        score = label_to_score.get(label, 0)
+        weighted_sum += score * similarity
+        total_weight += similarity
+    
+    # 최종 편향도
+    if total_weight == 0:
+        bias_score = 0.0
     else:
-        print(">> 기존 라이브러리가 없어 새로 구축합니다.")
-        df = store.load_data(CSV_PATH)
-        if df is None:
-            print("Error: CSV 파일을 찾을 수 없습니다.")
-            return
-
-        all_texts = []
-        all_titles = []
-        
-        print(">> 데이터 청킹(Chunking) 및 준비 중...")
-        for _, row in df.iterrows():
-            content = str(row.get('content', ''))
-            title = row.get('title', 'No Title')
-            
-            # 스마트 청킹 사용
-            chunks = store.chunk_text(content)
-            
-            for c in chunks:
-                all_texts.append(c)
-                all_titles.append(title)
-        
-        print(f">> {len(all_texts)}개의 청크 생성됨. 인덱싱 시작...")
-        store.build_index(all_texts, all_titles)
-        store.save()
-        print(">> 인덱싱 구축 및 저장 완료.\n")
-
-    # 3. YouTube Video 처리
-    VIDEO_ID = "TCaDxE3wXsI" 
-    print(f">> YouTube 스크립트 처리 중 ({VIDEO_ID})...")
+        bias_score = weighted_sum / total_weight
     
-    raw_script = get_video_transcript(VIDEO_ID)
-    if not raw_script: return
-
-    refined_script = refine_script(raw_script)
-    final_query_text = refined_script if refined_script else raw_script
-
-    # 4. 검색 수행 (검색 쿼리가 너무 길면 앞부분만 사용하거나 요약해서 사용)
-    # RAG에서는 보통 질문(Query)을 던지지만, 여기서는 스크립트 내용과 유사한 문서를 찾는 것이므로
-    # 스크립트 전체를 쿼리로 쓰기보다, 핵심 내용을 추출하거나 앞부분을 사용합니다.
-    query_text = final_query_text 
+    # 해석
+    if bias_score <= -1.5:
+        bias_label = "극좌"
+    elif bias_score <= -0.5:
+        bias_label = "좌파"
+    elif bias_score <= 0.5:
+        bias_label = "중도"
+    elif bias_score <= 1.5:
+        bias_label = "보수"
+    else:
+        bias_label = "극우"
     
-    print(f"\n>> 검색 수행 중 (Query 길이: {len(query_text)}자)...")
-    results = store.search(query_text, k=4)
+    return {
+        "score": round(bias_score, 4) * 10,
+        "label": bias_label,
+        "detail": label_counts
+    }
 
-    print("\n" + "="*50)
-    print(f"   RAG 검색 결과 (Top {len(results)})")
-    print("="*50)
+
+# ============================================================
+# Service Layer: analyze_video (Controller에서 호출)
+# ============================================================
+def analyze_video(video_id: str, tag: str) -> dict:
+    """
+    YouTube 영상을 분석하여 다음을 반환합니다:
+    {
+        "summary": 뉴스 요약 (3줄),
+        "biased_sentences": 편향이라 판단한 상위 2개 문장,
+        "bias_score": 편향도 점수,
+        "bias_label": 편향 레이블 (극좌/좌파/중도/보수/극우)
+    }
+    """
+    # 1. Vector Store 초기화 및 로드
+    store = HKTVectorStore()
+    if not store.load():
+        # 인덱스가 없으면 에러
+        return {"error": "Vector Store not found. Build index first."}
     
-    for i, res in enumerate(results):
-        print(f"\n[{i+1}] [유사도: {res['score']:.4f}] {res['title']}")
-        print(f"   내용: {res['content']}") 
+    # 2. YouTube 트랜스크립트 가져오기
+    raw_script = get_video_transcript(video_id)
+    if not raw_script:
+        return {"error": "Failed to fetch transcript."}
+    
+    # 3. 정제 + 요약
+    result = refine_script(raw_script)
+    refined_text = result.get("refined", raw_script)
+    summary = result.get("summary", "")
+    
+    # 4. Chunking
+    input_chunks = store.chunk_text(refined_text, chunk_size=100, overlap=10)
+    
+    # 5. RAG + Reranking
+    all_matches = []
+    for i, chunk in enumerate(input_chunks):
+        if len(chunk) < 10:
+            continue
         
-    if not results:
-        print("검색 결과가 없습니다.")
+        results = store.search(chunk, k=4)
+        if not results:
+            continue
+        
+        best = rerank_candidates(chunk, results)
+        if best:
+            all_matches.append({
+                "index": i + 1,
+                "input_chunk": chunk,
+                "found_content": best['content'],
+                "found_title": best['title'],
+                "score": float(best['score'])  # float32 -> float 변환
+            })
+    
+    # 6. 편향도 계산
+    bias_result = calculate_bias_score(all_matches)
+    
+    # 7. 상위 2개 편향 문장 추출 (유사도 높은 순)
+    all_matches.sort(key=lambda x: x['score'], reverse=True)
+    top2 = all_matches[:2]
+    biased_sentences = []
+    for m in top2:
+        biased_sentences.append(m["input_chunk"])
+    
+    return {
+        "report_text": summary,
+        "words": biased_sentences,
+        "weight": bias_result["score"]
+    }
 
-if __name__ == "__main__":
-    main()
 
+def service(tag: str):
+    """
+    CLI 테스트용 main 함수.
+    analyze_video() 서비스 함수를 호출하고 결과를 출력합니다.
+    """
+    import json
+    
+    print("=== YouTube RAG Pipeline (Service Test) ===\n")
+    
+    # 테스트할 비디오 ID
+    VIDEO_ID = "TCaDxE3wXsI"  # YTN
+    # VIDEO_ID = "YxmUIfr6HmU"  # 극우 테스트용
+    
+    print(f">> 분석 대상: {VIDEO_ID}\n")
+    
+    # 서비스 함수 호출
+    result = analyze_video(VIDEO_ID, tag)
+    
+    # 결과 출력
+    print("\n" + "="*80)
+    print("   [분석 결과 (Controller Response)]")
+    print("="*80)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print("="*80)
+    
+    return result
 
-'''
-1	보수논객
-2	좌파논객
-3	보수렉카
-4	중립
-5	좌파렉카
-'''
+# ============================================================
+# Label Reference (CSV title -> 레이블)
+# ============================================================
+# 1: 보수논객
+# 2: 좌파논객
+# 3: 보수렉카
+# 4: 중립
+# 5: 좌파렉카
+# ============================================================
