@@ -1,6 +1,10 @@
 import os
+from dotenv import load_dotenv
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
+
+# .env 파일 로드
+load_dotenv()
 
 # OpenAI API
 from openai import OpenAI

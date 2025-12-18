@@ -1,10 +1,14 @@
 import os
+from dotenv import load_dotenv
 import pickle
 import pandas as pd
 import faiss
 import numpy as np
 import time
 from typing import List, Dict, Optional
+
+# .env 파일 로드
+load_dotenv()
 
 # OpenAI API
 from openai import OpenAI
